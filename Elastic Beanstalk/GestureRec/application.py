@@ -1,6 +1,7 @@
 from flask import Flask, request
 from flask_restful import Resource, Api
 import json
+import get_video
 
 # print a nice greeting.
 def say_hello(username = "World"):
@@ -22,23 +23,6 @@ api = Api(app)
 application.add_url_rule('/', 'index', (lambda: header_text +
     say_hello() + instructions + footer_text))
 
-# # add a rule when the page is accessed with a name appended to the site
-# # URL.
-# application.add_url_rule('/<username>', 'hello', (lambda username:
-#     header_text + say_hello(username) + home_link + footer_text))
-
-# todos = {}
-
-# class TodoSimple(Resource):
-#     def get(self, todo_id):
-#         return {todo_id: todos[todo_id]}
-
-#     def put(self, todo_id):
-#         todos[todo_id] = request.form['data']
-#         return {todo_id: todos[todo_id]}
-
-# api.add_resource(TodoSimple, '/<string:todo_id>')
-
 @app.route('/newclip', methods=['GET'])
 def newclip():
    cID  = request.args.get('cID', None)
@@ -47,6 +31,8 @@ def newclip():
    cend  = request.args.get('cend', None)
 #    print('cID',cID,'title',title,'cstart',cstart,'cend',cend)
    mstring =  {'cID':  cID , 'title' : title , 'cstart' : cstart, 'cend': cend}
+   video = get_video.vid(cID,title,cstart,cend)
+   video.detect()
    return json.dumps({'success':True, 'input':mstring}), 200, {'ContentType':'application/json'}
 
 # run the app.
