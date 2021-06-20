@@ -1,115 +1,300 @@
-import pafy
-import csv
-
-import os
-import numpy as np
+# !pip install mediapipe opencv-python pandas scikit-learn
 import mediapipe as mp # Import mediapipe
 import cv2 # Import opencv
+import csv
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import make_pipeline 
+from sklearn.preprocessing import StandardScaler 
 
-##  If this error: pafy: youtube-dl not found;
-##  Run this:      pip install --upgrade youtube-dl
+from sklearn.linear_model import LogisticRegression, RidgeClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.metrics import accuracy_score # Accuracy metrics 
+import pickle 
 
-import os, sys
-sys.path.append('c:\\users\\roble\\appdata\\roaming\\python\\python37\\site-packages')
 
-class vid:
-    def __init__(self,vid_url,title, stime, etime):
-        self.vid_url = vid_url
-        self.title = title
-        self.stime = stime
-        self.etime = etime
-        self.mp_drawing = mp.solutions.drawing_utils # Drawing helpers
-        self.mp_holistic = mp.solutions.holistic # Mediapipe Solutions
-        print('initiated')
+vids = [{"cID": "qZEElv92rLM", "title": "Onda Onda", "cstart": "35137", "cend": "42571"},
+{"cID": "qZEElv92rLM", "title": "Controller Crew", "cstart": "110635", "cend": "112780"},
+{"cID": "qZEElv92rLM", "title": "Hit It", "cstart": "120177", "cend": "132160"},
+{"cID": "qZEElv92rLM", "title": "Billy Bounce", "cstart": "154580", "cend": "160941"},
+{"cID": "qZEElv92rLM", "title": "Dont' Start Now", "cstart": "175213", "cend": "188833"},
+{"cID": "qZEElv92rLM", "title": "Savage", "cstart": "197961", "cend": "211121"},
+{"cID": "qZEElv92rLM", "title": "The Flow", "cstart": "221555", "cend": "231141"},
+{"cID": "qZEElv92rLM", "title": "The Flow", "cstart": "233278", "cend": "238461"}]
 
-    def detect(self):
-        print('detect')
-        with self.mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic:
-            cap = cv2.VideoCapture(self.vid_url)
-            #cap.set(cv2.CAP_PROP_POS_FRAMES, 100)
-            cap.set(cv2.CAP_PROP_POS_MSEC, self.stime)
-            # Check if camera opened successfully
-            if (cap.isOpened()== False): 
-                print("Error opening video stream or file")
+import pafy, cv2, json, math
+# url = 'https://youtu.be/DK797d9ozN0?t=440'
 
-            # Read until video is completed
-            while(cap.isOpened()):
-                # Capture frame-by-frame
-                ret, frame = cap.read()
-                if ret == True:
+class Vid_Stream():
+    def __init__(self,vids,output_file, model_name, options = None):
+        self.yt_url = 'https://www.youtube.com/watch?v='
+        self.vids = vids
+        self.model_name = model_name
+        out = cv2.VideoWriter(output_file + '.mp4',cv2.VideoWriter_fourcc(*'MP4V'), 30, (640,480))
 
+        mp_drawing = mp.solutions.drawing_utils # Drawing helpers
+        mp_holistic = mp.solutions.holistic # Mediapipe Solutions
+        jumping_jack = cv2.imread('jumping_jack.jpg')
+        with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic:
+            self.results = holistic.process(jumping_jack)
+        num_coords = len(self.results.pose_landmarks.landmark)
+
+        landmarks = ['class']
+        for val in range(1, num_coords+1):
+            landmarks += ['x{}'.format(val), 'y{}'.format(val), 'z{}'.format(val), 'v{}'.format(val)]
+
+        with open(self.model_name + '_coords.csv', mode='w', newline='') as f:
+            csv_writer = csv.writer(f, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+            csv_writer.writerow(landmarks)
+
+        if not options is None:
+            self.options = options
+        else:
+            self.options = {'side':'both', 'save_vid':True}         
+
+        for vid in self.vids:
+            vPafy = pafy.new(self.yt_url + vid['cID'])
+            play = vPafy.getbest(preftype="mp4")
+            cap = cv2.VideoCapture(play.url)
+            cap.set(cv2.CAP_PROP_POS_MSEC, int(vid['cstart']))
+            # Initiate holistic model
+            with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic:
+
+                while cap.isOpened():
+                    ret, frame = cap.read()
+                    
 
                     # Recolor Feed
                     image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    image.flags.writeable = False        
-                    
+                           
+                    height, width, channels = image.shape
+                    if self.options['side'] == 'right':
+                        image = image[:, math.floor(width/2):width,:]
+                        cv2.imwrite('image.jpg',image)
+#                     image.flags.writeable = False 
                     # Make Detections
                     results = holistic.process(image)
                     # print(results.face_landmarks)
-                    
+
                     # face_landmarks, pose_landmarks, left_hand_landmarks, right_hand_landmarks
-                    
+
                     # Recolor image back to BGR for rendering
                     image.flags.writeable = True   
                     image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                    
-                    # 1. Draw face landmarks
-                    self.mp_drawing.draw_landmarks(image, results.face_landmarks, self.mp_holistic.FACE_CONNECTIONS, 
-                                            self.mp_drawing.DrawingSpec(color=(80,110,10), thickness=1, circle_radius=1),
-                                            self.mp_drawing.DrawingSpec(color=(80,256,121), thickness=1, circle_radius=1)
-                                            )
-                    
+
+            #         # 1. Draw face landmarks
+            #         mp_drawing.draw_landmarks(image, results.face_landmarks, mp_holistic.FACE_CONNECTIONS, 
+            #                                  mp_drawing.DrawingSpec(color=(80,110,10), thickness=1, circle_radius=1),
+            #                                  mp_drawing.DrawingSpec(color=(80,256,121), thickness=1, circle_radius=1)
+            #                                  )
+
                     # 2. Right hand
-                    self.mp_drawing.draw_landmarks(image, results.right_hand_landmarks, self.mp_holistic.HAND_CONNECTIONS, 
-                                            self.mp_drawing.DrawingSpec(color=(80,22,10), thickness=2, circle_radius=4),
-                                            self.mp_drawing.DrawingSpec(color=(80,44,121), thickness=2, circle_radius=2)
-                                            )
+                    mp_drawing.draw_landmarks(image, results.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS, 
+                                             mp_drawing.DrawingSpec(color=(80,22,10), thickness=2, circle_radius=4),
+                                             mp_drawing.DrawingSpec(color=(80,44,121), thickness=2, circle_radius=2)
+                                             )
 
                     # 3. Left Hand
-                    self.mp_drawing.draw_landmarks(image, results.left_hand_landmarks, self.mp_holistic.HAND_CONNECTIONS, 
-                                            self.mp_drawing.DrawingSpec(color=(121,22,76), thickness=2, circle_radius=4),
-                                            self.mp_drawing.DrawingSpec(color=(121,44,250), thickness=2, circle_radius=2)
-                                            )
+                    mp_drawing.draw_landmarks(image, results.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS, 
+                                             mp_drawing.DrawingSpec(color=(121,22,76), thickness=2, circle_radius=4),
+                                             mp_drawing.DrawingSpec(color=(121,44,250), thickness=2, circle_radius=2)
+                                             )
 
                     # 4. Pose Detections
-                    self.mp_drawing.draw_landmarks(image, results.pose_landmarks, self.mp_holistic.POSE_CONNECTIONS, 
-                                            self.mp_drawing.DrawingSpec(color=(245,117,66), thickness=2, circle_radius=4),
-                                            self.mp_drawing.DrawingSpec(color=(245,66,230), thickness=2, circle_radius=2)
-                                            )
+                    mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_holistic.POSE_CONNECTIONS, 
+                                             mp_drawing.DrawingSpec(color=(245,117,66), thickness=2, circle_radius=4),
+                                             mp_drawing.DrawingSpec(color=(245,66,230), thickness=2, circle_radius=2)
+                                             )
+                    # Export coordinates
+                    try:
+                            # Extract Pose landmarks
+                        pose = results.pose_landmarks.landmark
+                        pose_row = list(np.array([[landmark.x, landmark.y, landmark.z, landmark.visibility] for landmark in pose]).flatten())
 
-                    # Display the resulting frame
-                    # cv2.imshow('Frame',frame)
-                    cv2.imshow('Raw Webcam Feed', image)
-                    print(cap.get(cv2.CAP_PROP_POS_MSEC))
+            #                 # Extract Face landmarks
+            #                 face = results.face_landmarks.landmark
+            #                 face_row = list(np.array([[landmark.x, landmark.y, landmark.z, landmark.visibility] for landmark in face]).flatten())
 
+                        # Concate rows
+                        row = pose_row   #+face_row
 
-                    # Press Q on keyboard to  exit
-                    if cv2.waitKey(25) & 0xFF == ord('q'):
+                        # Append class name 
+                        row.insert(0, vid['title'])
+
+                        # Export to CSV
+                        with open(self.model_name + '_coords.csv', mode='a', newline='') as f:
+                            csv_writer = csv.writer(f, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+                            csv_writer.writerow(row)
+
+                    except:
+                        pass
+
+                    cv2.imshow( vid['title'] + ' Trick Maneuver Training video' , image)
+                    # resize image
+                    dim = (640, 480)
+                    image = cv2.resize(image, dim, interpolation = cv2.INTER_AREA)
+                    out.write(image)
+
+                    if cv2.waitKey(10) & 0xFF == ord('q'):
                         break
 
-                    if cap.get(cv2.CAP_PROP_POS_MSEC) > self.etime:
+                    cur_time = cap.get(cv2.CAP_PROP_POS_MSEC)
+                    if cur_time > int(vid['cend']):
                         break
 
-                # Break the loop
-                else: 
+            cap.release()
+            cv2.destroyAllWindows()
+        out.release()
+
+    def train_model(self):
+        df = pd.read_csv(self.model_name + '_coords.csv')
+        X = df.drop('class', axis=1) # features
+        X.dropna(axis=1, how='any', inplace=True)
+        y = df['class'] # target value
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=1234)
+
+        pipelines = {
+            'lr':make_pipeline(StandardScaler(), LogisticRegression()),
+            'rc':make_pipeline(StandardScaler(), RidgeClassifier()),
+            'rf':make_pipeline(StandardScaler(), RandomForestClassifier()),
+            'gb':make_pipeline(StandardScaler(), GradientBoostingClassifier()),
+        }
+        fit_models = {}
+        for algo, pipeline in pipelines.items():
+            model = pipeline.fit(X_train, y_train)
+            fit_models[algo] = model
+
+        fit_models['rc'].predict(X_test)
+
+        for algo, model in fit_models.items():
+            yhat = model.predict(X_test)
+            print(algo, accuracy_score(y_test, yhat))
+        fit_models['rf'].predict(X_test)
+        with open(self.model_name + '_body_language.pkl', 'wb') as f:
+            pickle.dump(fit_models['rf'], f)
+
+class Detect():
+    def __init__(self,model_name):
+        self.model_name = model_name
+        cap = cv2.VideoCapture(0)
+        # Initiate holistic model
+        with open(self.model_name + '_body_language.pkl', 'rb') as f:
+            model = pickle.load(f)
+        mp_drawing = mp.solutions.drawing_utils # Drawing helpers
+        mp_holistic = mp.solutions.holistic # Mediapipe Solutions
+        with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic:
+            
+            while cap.isOpened():
+                ret, frame = cap.read()
+                
+                # Recolor Feed
+                image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                image.flags.writeable = False        
+                
+                # Make Detections
+                results = holistic.process(image)
+                # print(results.face_landmarks)
+                
+                # face_landmarks, pose_landmarks, left_hand_landmarks, right_hand_landmarks
+                
+                # Recolor image back to BGR for rendering
+                image.flags.writeable = True   
+                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                
+                # 1. Draw face landmarks
+                mp_drawing.draw_landmarks(image, results.face_landmarks, mp_holistic.FACE_CONNECTIONS, 
+                                        mp_drawing.DrawingSpec(color=(80,110,10), thickness=1, circle_radius=1),
+                                        mp_drawing.DrawingSpec(color=(80,256,121), thickness=1, circle_radius=1)
+                                        )
+                
+                # 2. Right hand
+                mp_drawing.draw_landmarks(image, results.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS, 
+                                        mp_drawing.DrawingSpec(color=(80,22,10), thickness=2, circle_radius=4),
+                                        mp_drawing.DrawingSpec(color=(80,44,121), thickness=2, circle_radius=2)
+                                        )
+
+                # 3. Left Hand
+                mp_drawing.draw_landmarks(image, results.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS, 
+                                        mp_drawing.DrawingSpec(color=(121,22,76), thickness=2, circle_radius=4),
+                                        mp_drawing.DrawingSpec(color=(121,44,250), thickness=2, circle_radius=2)
+                                        )
+
+                # 4. Pose Detections
+                mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_holistic.POSE_CONNECTIONS, 
+                                        mp_drawing.DrawingSpec(color=(245,117,66), thickness=2, circle_radius=4),
+                                        mp_drawing.DrawingSpec(color=(245,66,230), thickness=2, circle_radius=2)
+                                        )
+                # Export coordinates
+                try:
+                    # Extract Pose landmarks
+                    pose = results.pose_landmarks.landmark
+                    pose_row = list(np.array([[landmark.x, landmark.y, landmark.z, landmark.visibility] for landmark in pose]).flatten())
+                    
+                    # Extract Face landmarks
+                    face = results.face_landmarks.landmark
+                    face_row = list(np.array([[landmark.x, landmark.y, landmark.z, landmark.visibility] for landmark in face]).flatten())
+                    
+                    # Concate rows
+                    row = pose_row+face_row
+                    
+        #             # Append class name 
+        #             row.insert(0, class_name)
+                    
+        #             # Export to CSV
+        #             with open('coords.csv', mode='a', newline='') as f:
+        #                 csv_writer = csv.writer(f, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        #                 csv_writer.writerow(row) 
+
+                    # Make Detections
+                    X = pd.DataFrame([row])
+                    body_language_class = model.predict(X)[0]
+                    body_language_prob = model.predict_proba(X)[0]
+                    print(body_language_class, body_language_prob)
+                    
+                    # Grab ear coords
+                    coords = tuple(np.multiply(
+                                    np.array(
+                                        (results.pose_landmarks.landmark[mp_holistic.PoseLandmark.LEFT_EAR].x, 
+                                        results.pose_landmarks.landmark[mp_holistic.PoseLandmark.LEFT_EAR].y))
+                                , [640,480]).astype(int))
+                    
+                    cv2.rectangle(image, 
+                                (coords[0], coords[1]+5), 
+                                (coords[0]+len(body_language_class)*20, coords[1]-30), 
+                                (245, 117, 16), -1)
+                    cv2.putText(image, body_language_class, coords, 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+                    
+                    # Get status box
+                    cv2.rectangle(image, (0,0), (250, 60), (245, 117, 16), -1)
+                    
+                    # Display Class
+                    cv2.putText(image, 'CLASS'
+                                , (95,12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+                    cv2.putText(image, body_language_class.split(' ')[0]
+                                , (90,40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+                    
+                    # Display Probability
+                    cv2.putText(image, 'PROB'
+                                , (15,12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+                    cv2.putText(image, str(round(body_language_prob[np.argmax(body_language_prob)],2))
+                                , (10,40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+                    
+                except:
+                    pass
+                                
+                cv2.imshow(self.model_name + ' Raw Webcam Feed', image)
+
+                if cv2.waitKey(10) & 0xFF == ord('q'):
                     break
 
-            # When everything done, release the video capture object
-            cap.release()
-
-            # Closes all the frames
-            cv2.destroyAllWindows()
+        cap.release()
+        cv2.destroyAllWindows()
 
 
-def main():
-    print('main')
-    vid_url = "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-    title = 'bigBuckBunny'
-    stime = 225000
-    etime = 230000
-    video = vid(vid_url,title,stime,etime)
-    video.detect()
+# options = {'side':'right', 'save_vid':True}
+# vid_processor = Vid_Stream(vids[:2],'output_file','Fortnite_Emotes', options=options)
+# vid_processor.train_model()
 
-
-if __name__ == '__main__':
-    main()
+Detect('Fortnite_Emotes')
