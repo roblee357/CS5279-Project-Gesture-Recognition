@@ -11,8 +11,10 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression, RidgeClassifier
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.metrics import accuracy_score # Accuracy metrics 
-import pickle 
+import pickle, traceback
 
+# Ref: https://google.github.io/mediapipe/solutions/pose.html
+# Ref: https://codepen.io/mediapipe/pen/jOMbvxw web solution
 
 vids = [{"cID": "qZEElv92rLM", "title": "Onda Onda", "cstart": "35137", "cend": "42571"},
 {"cID": "qZEElv92rLM", "title": "Controller Crew", "cstart": "110635", "cend": "112780"},
@@ -27,11 +29,11 @@ import pafy, cv2, json, math
 # url = 'https://youtu.be/DK797d9ozN0?t=440'
 
 class Vid_Stream():
-    def __init__(self,vids,output_file, model_name, options = None):
+    def __init__(self,vids, model_name, options = None, trail_frames = [5,15]):
         self.yt_url = 'https://www.youtube.com/watch?v='
         self.vids = vids
         self.model_name = model_name
-        out = cv2.VideoWriter(output_file + '.mp4',cv2.VideoWriter_fourcc(*'MP4V'), 30, (640,480))
+        out = cv2.VideoWriter(model_name + '.mp4',cv2.VideoWriter_fourcc(*'MP4V'), 30, (640,480))
 
         mp_drawing = mp.solutions.drawing_utils # Drawing helpers
         mp_holistic = mp.solutions.holistic # Mediapipe Solutions
@@ -41,12 +43,18 @@ class Vid_Stream():
         num_coords = len(self.results.pose_landmarks.landmark)
 
         landmarks = ['class']
+        
         for val in range(1, num_coords+1):
             landmarks += ['x{}'.format(val), 'y{}'.format(val), 'z{}'.format(val), 'v{}'.format(val)]
+        for hist_frame in trail_frames:
+            for val in range(1, num_coords+1):
+                landmarks += ['x{}'.format(val) + '_tf{}'.format(hist_frame), 'y{}'.format(val) + '_tf{}'.format(hist_frame), 'z{}'.format(val) + '_tf{}'.format(hist_frame), 'v{}'.format(val) + '_tf{}'.format(hist_frame)]        
 
         with open(self.model_name + '_coords.csv', mode='w', newline='') as f:
             csv_writer = csv.writer(f, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-            csv_writer.writerow(landmarks)
+            landmarks_header = landmarks
+            del landmarks_header[5:42]
+            csv_writer.writerow(landmarks_header)
 
         if not options is None:
             self.options = options
@@ -59,9 +67,12 @@ class Vid_Stream():
             cap = cv2.VideoCapture(play.url)
             cap.set(cv2.CAP_PROP_POS_MSEC, int(vid['cstart']))
             # Initiate holistic model
+            frame_num = 0
+            frame_list = []
             with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic:
 
                 while cap.isOpened():
+                    frame_num = frame_num + 1
                     ret, frame = cap.read()
                     
 
@@ -111,6 +122,8 @@ class Vid_Stream():
                             # Extract Pose landmarks
                         pose = results.pose_landmarks.landmark
                         pose_row = list(np.array([[landmark.x, landmark.y, landmark.z, landmark.visibility] for landmark in pose]).flatten())
+                        # remove face landmarks
+                        del pose_row[3:43]
 
             #                 # Extract Face landmarks
             #                 face = results.face_landmarks.landmark
@@ -118,18 +131,35 @@ class Vid_Stream():
 
                         # Concate rows
                         row = pose_row   #+face_row
+                        frame_list.insert(0,row)
+                        print('len(frame_list)',len(frame_list))
 
-                        # Append class name 
-                        row.insert(0, vid['title'])
+                        if frame_num >= max(trail_frames):
+                            for frame_no in trail_frames:
+                                try:
+                                    row = row + frame_list[frame_no]
+                                except Exception as e:
+                                    traceback.print_tb(e.__traceback__)
+                                    print('frame_no',frame_no,e)
 
-                        # Export to CSV
-                        with open(self.model_name + '_coords.csv', mode='a', newline='') as f:
-                            csv_writer = csv.writer(f, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-                            csv_writer.writerow(row)
+                            # Append class name 
+                            row.insert(0, vid['title'])
+                            print('len(row)',len(row))
 
-                    except:
-                        pass
+                            # Export to CSV
+                            if len(row)>200:
+                                with open(self.model_name + '_coords.csv', mode='a', newline='') as f:
+                                    csv_writer = csv.writer(f, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+                                    csv_writer.writerow(row)
+                        try:
+                            frame_list.pop(max(trail_frames))
+                        except:
+                            print ('frame_num',frame_num)
 
+                    except Exception as e:
+                        traceback.print_tb(e.__traceback__)
+                        print(e)
+                    cv2.putText(image, vid['title'], (5,12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
                     cv2.imshow( vid['title'] + ' Trick Maneuver Training video' , image)
                     # resize image
                     dim = (640, 480)
@@ -151,6 +181,8 @@ class Vid_Stream():
         df = pd.read_csv(self.model_name + '_coords.csv')
         X = df.drop('class', axis=1) # features
         X.dropna(axis=1, how='any', inplace=True)
+        # Remove three columns as index base
+        # X.drop(X.columns[4:44], axis = 1, inplace = True)
         y = df['class'] # target value
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=1234)
 
@@ -169,23 +201,31 @@ class Vid_Stream():
 
         for algo, model in fit_models.items():
             yhat = model.predict(X_test)
-            print(algo, accuracy_score(y_test, yhat))
+            # print(algo, accuracy_score(y_test, yhat))
         fit_models['rf'].predict(X_test)
         with open(self.model_name + '_body_language.pkl', 'wb') as f:
             pickle.dump(fit_models['rf'], f)
 
 class Detect():
-    def __init__(self,model_name):
+    def __init__(self,model_name,source = 0,trail_frames=[5,15]):
         self.model_name = model_name
-        cap = cv2.VideoCapture(0)
+        if source != 0:
+            self.yt_url = 'https://www.youtube.com/watch?v='
+            vPafy = pafy.new(self.yt_url + source)
+            play = vPafy.getbest(preftype="mp4")
+            source = play.url
+        cap = cv2.VideoCapture(source)
         # Initiate holistic model
         with open(self.model_name + '_body_language.pkl', 'rb') as f:
             model = pickle.load(f)
         mp_drawing = mp.solutions.drawing_utils # Drawing helpers
         mp_holistic = mp.solutions.holistic # Mediapipe Solutions
+        frame_num = 0
+        frame_list = []
         with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic:
             
             while cap.isOpened():
+                frame_num = frame_num + 1
                 ret, frame = cap.read()
                 
                 # Recolor Feed
@@ -202,23 +242,23 @@ class Detect():
                 image.flags.writeable = True   
                 image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
                 
-                # 1. Draw face landmarks
-                mp_drawing.draw_landmarks(image, results.face_landmarks, mp_holistic.FACE_CONNECTIONS, 
-                                        mp_drawing.DrawingSpec(color=(80,110,10), thickness=1, circle_radius=1),
-                                        mp_drawing.DrawingSpec(color=(80,256,121), thickness=1, circle_radius=1)
-                                        )
+                # # 1. Draw face landmarks
+                # mp_drawing.draw_landmarks(image, results.face_landmarks, mp_holistic.FACE_CONNECTIONS, 
+                #                         mp_drawing.DrawingSpec(color=(80,110,10), thickness=1, circle_radius=1),
+                #                         mp_drawing.DrawingSpec(color=(80,256,121), thickness=1, circle_radius=1)
+                #                         )
                 
-                # 2. Right hand
-                mp_drawing.draw_landmarks(image, results.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS, 
-                                        mp_drawing.DrawingSpec(color=(80,22,10), thickness=2, circle_radius=4),
-                                        mp_drawing.DrawingSpec(color=(80,44,121), thickness=2, circle_radius=2)
-                                        )
+                # # 2. Right hand
+                # mp_drawing.draw_landmarks(image, results.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS, 
+                #                         mp_drawing.DrawingSpec(color=(80,22,10), thickness=2, circle_radius=4),
+                #                         mp_drawing.DrawingSpec(color=(80,44,121), thickness=2, circle_radius=2)
+                #                         )
 
-                # 3. Left Hand
-                mp_drawing.draw_landmarks(image, results.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS, 
-                                        mp_drawing.DrawingSpec(color=(121,22,76), thickness=2, circle_radius=4),
-                                        mp_drawing.DrawingSpec(color=(121,44,250), thickness=2, circle_radius=2)
-                                        )
+                # # 3. Left Hand
+                # mp_drawing.draw_landmarks(image, results.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS, 
+                #                         mp_drawing.DrawingSpec(color=(121,22,76), thickness=2, circle_radius=4),
+                #                         mp_drawing.DrawingSpec(color=(121,44,250), thickness=2, circle_radius=2)
+                #                         )
 
                 # 4. Pose Detections
                 mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_holistic.POSE_CONNECTIONS, 
@@ -230,14 +270,25 @@ class Detect():
                     # Extract Pose landmarks
                     pose = results.pose_landmarks.landmark
                     pose_row = list(np.array([[landmark.x, landmark.y, landmark.z, landmark.visibility] for landmark in pose]).flatten())
-                    
-                    # Extract Face landmarks
-                    face = results.face_landmarks.landmark
-                    face_row = list(np.array([[landmark.x, landmark.y, landmark.z, landmark.visibility] for landmark in face]).flatten())
+                    # remove face landmarks
+                    del pose_row[3:43]    
+
+                    # # Extract Face landmarks
+                    # face = results.face_landmarks.landmark
+                    # face_row = list(np.array([[landmark.x, landmark.y, landmark.z, landmark.visibility] for landmark in face]).flatten())
                     
                     # Concate rows
-                    row = pose_row+face_row
-                    
+                    row = pose_row  #+face_row
+                    frame_list.insert(0,row)
+                    print('len(frame_list)',len(frame_list))      
+
+                    if frame_num >= max(trail_frames):
+                        for frame_no in trail_frames:
+                            try:
+                                row = row + frame_list[frame_no]
+                            except Exception as e:
+                                traceback.print_tb(e.__traceback__)
+                                # print('frame_no',frame_no,e)                               
         #             # Append class name 
         #             row.insert(0, class_name)
                     
@@ -246,43 +297,47 @@ class Detect():
         #                 csv_writer = csv.writer(f, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
         #                 csv_writer.writerow(row) 
 
-                    # Make Detections
-                    X = pd.DataFrame([row])
-                    body_language_class = model.predict(X)[0]
-                    body_language_prob = model.predict_proba(X)[0]
-                    print(body_language_class, body_language_prob)
+                        # Make Detections
+                        X = pd.DataFrame([row])
+                        # print('model.n_features_',model.n_features_,'len(row)',len(row))
+                        body_language_class = model.predict(X)[0]
+                        body_language_prob = model.predict_proba(X)[0]
+                        print('model.predict_proba(X)', model.predict_proba(X))
+                        print('model.predict(X)',model.predict(X))
+                        
+                        # Grab ear coords
+                        coords = tuple(np.multiply(
+                                        np.array(
+                                            (results.pose_landmarks.landmark[mp_holistic.PoseLandmark.LEFT_EAR].x, 
+                                            results.pose_landmarks.landmark[mp_holistic.PoseLandmark.LEFT_EAR].y))
+                                    , [640,480]).astype(int))
+                        
+                        cv2.rectangle(image, 
+                                    (coords[0], coords[1]+5), 
+                                    (coords[0]+len(body_language_class)*20, coords[1]-30), 
+                                    (245, 117, 16), -1)
+                        cv2.putText(image, body_language_class, coords, 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+                        
+                        # Get status box
+                        cv2.rectangle(image, (0,0), (250, 60), (245, 117, 16), -1)
+                        
+                        # Display Class
+                        cv2.putText(image, 'CLASS'
+                                    , (95,12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+                        cv2.putText(image, body_language_class.split(' ')[0]
+                                    , (90,40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+                        # print('body_language_class.split(' ')[0]',body_language_class.split(' ')[0])
+                        # Display Probability
+                        cv2.putText(image, 'PROB'
+                                    , (15,12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+                        cv2.putText(image, str(round(body_language_prob[np.argmax(body_language_prob)],2))
+                                    , (10,40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
                     
-                    # Grab ear coords
-                    coords = tuple(np.multiply(
-                                    np.array(
-                                        (results.pose_landmarks.landmark[mp_holistic.PoseLandmark.LEFT_EAR].x, 
-                                        results.pose_landmarks.landmark[mp_holistic.PoseLandmark.LEFT_EAR].y))
-                                , [640,480]).astype(int))
-                    
-                    cv2.rectangle(image, 
-                                (coords[0], coords[1]+5), 
-                                (coords[0]+len(body_language_class)*20, coords[1]-30), 
-                                (245, 117, 16), -1)
-                    cv2.putText(image, body_language_class, coords, 
-                                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
-                    
-                    # Get status box
-                    cv2.rectangle(image, (0,0), (250, 60), (245, 117, 16), -1)
-                    
-                    # Display Class
-                    cv2.putText(image, 'CLASS'
-                                , (95,12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
-                    cv2.putText(image, body_language_class.split(' ')[0]
-                                , (90,40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
-                    
-                    # Display Probability
-                    cv2.putText(image, 'PROB'
-                                , (15,12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
-                    cv2.putText(image, str(round(body_language_prob[np.argmax(body_language_prob)],2))
-                                , (10,40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
-                    
-                except:
-                    pass
+                except Exception as e:
+                    traceback.print_tb(e.__traceback__)
+                    print(e)
+                    # pass
                                 
                 cv2.imshow(self.model_name + ' Raw Webcam Feed', image)
 
@@ -294,7 +349,12 @@ class Detect():
 
 
 # options = {'side':'right', 'save_vid':True}
-# vid_processor = Vid_Stream(vids[:2],'output_file','Fortnite_Emotes', options=options)
+# vid_processor = Vid_Stream(vids,'Fortnite_Emotes', options=options)
 # vid_processor.train_model()
 
-Detect('Fortnite_Emotes')
+# Detect('Fortnite_Emotes',source = 'qZEElv92rLM')
+
+with open('Fortnite_Emotes' + '_body_language.pkl', 'rb') as f:
+    model = pickle.load(f)
+print('model',model.classes_)
+print(model.get_support(indices=True))
