@@ -354,7 +354,7 @@ class Detect():
 
 # Detect('Fortnite_Emotes',source = 'qZEElv92rLM')
 
-with open('Fortnite_Emotes' + '_body_language.pkl', 'rb') as f:
-    model = pickle.load(f)
-print('model',model.classes_)
-print(model.get_support(indices=True))
+# with open('Fortnite_Emotes' + '_body_language.pkl', 'rb') as f:
+#     model = pickle.load(f)
+# print('model',model.classes_)
+# print(model.get_support(indices=True))
