@@ -321,8 +321,8 @@ class Detect():
                 # cv2.imshow(self.model_name + ' Raw Webcam Feed', image)
                 # cv2.imwrite('live.jpeg',image)
 
-                if cv2.waitKey(10) & 0xFF == ord('q'):
-                    break
+                # if cv2.waitKey(10) & 0xFF == ord('q'):
+                #     break
 
         cap.release()
         cv2.destroyAllWindows()
