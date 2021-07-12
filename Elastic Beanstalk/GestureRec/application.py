@@ -1,7 +1,8 @@
-from flask import Flask, flash, redirect, request, send_file, abort, render_template, Response
+from flask import Flask, flash, redirect, request, send_file, abort, render_template, Response, stream_with_context
 from flask_restful import Resource, Api, url_for
 from werkzeug.utils import secure_filename
 import json, os
+import threading
 
 UPLOAD_FOLDER = 'static/uploads'
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif','mp4'}
@@ -24,12 +25,26 @@ instructions = '''
     <p><em>Gesture Recognition</em>:</p>'''
 home_link = '<p><a href="/">Back</a></p>\n'
 footer_text = '</body>\n</html>'
-
+upload_form =     b'''
+    <!doctype html>
+    <title>Gesture recognition</title>
+    <h1>Upload MP4 video for Fortnite dance gesture recognition</h1>
+    <form method=post enctype=multipart/form-data>
+      <input type=file name=file>
+      <input type=submit value=Upload>
+    </form>
+    <form method="POST">
+        <input name="YouTube URL">
+        <input type="submit">
+    </form>
+    '''
+jumping_jack = cv2.imread('jumping_jack.jpg')
+img_str_bytes = cv2.imencode('.jpg', jumping_jack)[1].tobytes()
 # EB looks for an 'application' callable by default.
 application = app = Flask(__name__)
 api = Api(app)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
+detector = Detect()
 # # add a rule for the index page.
 # application.add_url_rule('/', 'index', (lambda: header_text +
 #     say_hello() + instructions + footer_text))
@@ -53,47 +68,67 @@ def gen():
     while True:
         image_path = os.path.join(os.getcwd(),'live.jpeg')
         image = cv2.imread(image_path)
-        img_str = cv2.imencode('.jpg', image)[1].tostring()
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + img_str + b'\r\n')
+        try:
+            try:
+                img_str = cv2.imencode('.jpg', image)[1].tobytes()
+                yield (  upload_form + b'--frame\r\n'
+                    b'Content-Type: image/jpeg\r\n\r\n' + img_str + b'\r\n')
+                last_img_str = img_str
+            except:
+                yield (  upload_form + b'--frame\r\n'
+                    b'Content-Type: image/jpeg\r\n\r\n' + last_img_str + b'\r\n')            
+        except:
+            yield (  upload_form + b'--frame\r\n'
+                b'Content-Type: image/jpeg\r\n\r\n' + img_str_bytes + b'\r\n')
 
 @app.route('/video_feed')
 def video_feed():
-    return Response(gen(),
+    return Response(stream_with_context(gen()),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/stop', methods=['GET', 'POST'])
+def stop_detector():
+    if request.method == 'POST':
+        # detector.stop_threads = True
+        detector.newStartupThread.raise_exception()
+        print('raising exception')
+    return redirect(url_for('upload_file'))
 
 @app.route('/', methods=['GET', 'POST'])
 def upload_file():
     if request.method == 'POST':
-        # check if the post request has the file part
-        if 'file' not in request.files:
-            flash('No file part')
-            return redirect(request.url)
-        file = request.files['file']
-        # If the user does not select a file, the browser submits an
-        # empty file without a filename.
-        if file.filename == '':
-            flash('No selected file')
-            return redirect(request.url)
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-            options = {'side':'right', 'save_vid':True}
-            vid_processor = Vid_Stream('Fortnite_Emotes')
-            # vid_processor.extract(vids, options=options)
-            # vid_processor.train_model()
+        if  len(request.form['YouTube URL']) > 10 :
+            YT_URL =request.form['YouTube URL']
+            YT_watchID = YT_URL.split('v=')[1]
+            detector.start(YT_watchID)
 
-            Detect('Fortnite_Emotes',source = 'qZEElv92rLM')
-            return redirect(url_for('download_file'))
-    return '''
-    <!doctype html>
-    <title>Gesture recognition</title>
-    <h1>Upload MP4 video for Fortnite dance gesture recognition</h1>
-    <form method=post enctype=multipart/form-data>
-      <input type=file name=file>
-      <input type=submit value=Upload>
-    </form>
-    '''
+            # Detect('Fortnite_Emotes',source = YT_watchID)
+            return redirect(url_for('video_feed'))
+
+        # # check if the post request has the file part
+        # if 'file' not in request.files:
+        #     flash('No file part')
+        #     return redirect(request.url)
+        # file = request.files['file']
+        # # If the user does not select a file, the browser submits an
+        # # empty file without a filename.
+        # if file.filename == '':
+        #     flash('No selected file')
+        #     return redirect(request.url)
+
+        # if file and allowed_file(file.filename):
+        #     filename = secure_filename(file.filename)
+        #     file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+        #     options = {'side':'right', 'save_vid':True}
+        #     vid_processor = Vid_Stream(vids,'Fortnite_Emotes', options=options)
+        #     # vid_processor.extract(vids, options=options)
+        #     # vid_processor.train_model()
+
+        #     Detect('Fortnite_Emotes',source = 'qZEElv92rLM')
+        #     return redirect(url_for('download_file'))
+
+    return  upload_form
+
 
 @app.route('/files')
 def dir_listing():
