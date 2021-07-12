@@ -67,7 +67,8 @@ def newclip():
 def gen():
     while True:
         image_path = os.path.join(os.getcwd(),'live.jpeg')
-        image = cv2.imread(image_path)
+        # image = cv2.imread(image_path)
+        image = detector.image
         try:
             try:
                 img_str = cv2.imencode('.jpg', image)[1].tobytes()

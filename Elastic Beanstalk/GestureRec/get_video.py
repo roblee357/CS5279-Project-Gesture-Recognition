@@ -232,7 +232,7 @@ class Detect():
             while cap.isOpened():
                 if self.stop_threads:
                     break
-                print(self.stop_threads)
+                # print(self.stop_threads)
                 frame_num = frame_num + 1
                 ret, frame = cap.read()
                 
@@ -248,25 +248,7 @@ class Detect():
                 
                 # Recolor image back to BGR for rendering
                 image.flags.writeable = True   
-                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                
-                # # 1. Draw face landmarks
-                # self.mp_drawing.draw_landmarks(image, results.face_landmarks, self.mp_holistic.FACE_CONNECTIONS, 
-                #                         self.mp_drawing.DrawingSpec(color=(80,110,10), thickness=1, circle_radius=1),
-                #                         self.mp_drawing.DrawingSpec(color=(80,256,121), thickness=1, circle_radius=1)
-                #                         )
-                
-                # # 2. Right hand
-                # self.mp_drawing.draw_landmarks(image, results.right_hand_landmarks, self.mp_holistic.HAND_CONNECTIONS, 
-                #                         self.mp_drawing.DrawingSpec(color=(80,22,10), thickness=2, circle_radius=4),
-                #                         self.mp_drawing.DrawingSpec(color=(80,44,121), thickness=2, circle_radius=2)
-                #                         )
-
-                # # 3. Left Hand
-                # self.mp_drawing.draw_landmarks(image, results.left_hand_landmarks, self.mp_holistic.HAND_CONNECTIONS, 
-                #                         self.mp_drawing.DrawingSpec(color=(121,22,76), thickness=2, circle_radius=4),
-                #                         self.mp_drawing.DrawingSpec(color=(121,44,250), thickness=2, circle_radius=2)
-                #                         )
+                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)                
 
                 # 4. Pose Detections
                 self.mp_drawing.draw_landmarks(image, results.pose_landmarks, self.mp_holistic.POSE_CONNECTIONS, 
@@ -280,10 +262,6 @@ class Detect():
                     pose_row = list(np.array([[landmark.x, landmark.y, landmark.z, landmark.visibility] for landmark in pose]).flatten())
                     # remove face landmarks
                     del pose_row[3:43]    
-
-                    # # Extract Face landmarks
-                    # face = results.face_landmarks.landmark
-                    # face_row = list(np.array([[landmark.x, landmark.y, landmark.z, landmark.visibility] for landmark in face]).flatten())
                     
                     # Concate rows
                     row = pose_row  #+face_row
@@ -297,13 +275,6 @@ class Detect():
                             except Exception as e:
                                 traceback.print_tb(e.__traceback__)
                                 # print('frame_no',frame_no,e)                               
-        #             # Append class name 
-        #             row.insert(0, class_name)
-                    
-        #             # Export to CSV
-        #             with open('coords.csv', mode='a', newline='') as f:
-        #                 csv_writer = csv.writer(f, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-        #                 csv_writer.writerow(row) 
 
                         # Make Detections
                         X = pd.DataFrame([row])
@@ -344,11 +315,11 @@ class Detect():
                     
                 except Exception as e:
                     traceback.print_tb(e.__traceback__)
-                    print(e)
+                    print('exception and ',e)
                     # pass
-                                
+                self.image = image                
                 # cv2.imshow(self.model_name + ' Raw Webcam Feed', image)
-                cv2.imwrite('live.jpeg',image)
+                # cv2.imwrite('live.jpeg',image)
 
                 if cv2.waitKey(10) & 0xFF == ord('q'):
                     break
